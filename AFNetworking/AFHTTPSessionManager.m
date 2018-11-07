@@ -77,9 +77,9 @@
     }
 
     self.baseURL = url;
-
-    self.requestSerializer = [AFHTTPRequestSerializer serializer];
-    self.responseSerializer = [AFJSONResponseSerializer serializer];
+ 
+    self.requestSerializer = [AFHTTPRequestSerializer serializer];     // 默认使用 AFHTTPRequestSerializer
+    self.responseSerializer = [AFJSONResponseSerializer serializer];   // 默认使用 AFJSONResponseSerializer. 所以，要解析其他格式的response，如XML，则需要自己写符合协议AFURLResponseSerialization
 
     return self;
 }
@@ -241,6 +241,7 @@
                        success:(void (^)(NSURLSessionDataTask * _Nonnull, id _Nullable))success failure:(void (^)(NSURLSessionDataTask * _Nullable, NSError * _Nonnull))failure
 {
     NSError *serializationError = nil;
+    // 组装 multipart-Form 的body及相关的header 会调用AFStreamingMultipartFormData
     NSMutableURLRequest *request = [self.requestSerializer multipartFormRequestWithMethod:@"POST" URLString:[[NSURL URLWithString:URLString relativeToURL:self.baseURL] absoluteString] parameters:parameters constructingBodyWithBlock:block error:&serializationError];
     for (NSString *headerField in headers.keyEnumerator) {
         [request addValue:headers[headerField] forHTTPHeaderField:headerField];
@@ -255,6 +256,7 @@
         return nil;
     }
     
+    // 对于multi-part form, 返回upload task
     __block NSURLSessionDataTask *task = [self uploadTaskWithStreamedRequest:request progress:uploadProgress completionHandler:^(NSURLResponse * __unused response, id responseObject, NSError *error) {
         if (error) {
             if (failure) {
@@ -345,7 +347,9 @@
                                          failure:(void (^)(NSURLSessionDataTask *, NSError *))failure
 {
     NSError *serializationError = nil;
+    // step1. 利用 requestSerializer（AFHTTPRequestSerializer）先生成request
     NSMutableURLRequest *request = [self.requestSerializer requestWithMethod:method URLString:[[NSURL URLWithString:URLString relativeToURL:self.baseURL] absoluteString] parameters:parameters error:&serializationError];
+    // step2. 再填入header fields
     for (NSString *headerField in headers.keyEnumerator) {
         [request addValue:headers[headerField] forHTTPHeaderField:headerField];
     }
@@ -358,7 +362,8 @@
 
         return nil;
     }
-
+    
+    // step3. 调用父类方法，根据NSURLRequest *request, 返回对应的dataTask
     __block NSURLSessionDataTask *dataTask = nil;
     dataTask = [self dataTaskWithRequest:request
                           uploadProgress:uploadProgress

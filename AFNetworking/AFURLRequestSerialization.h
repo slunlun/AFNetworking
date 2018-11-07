@@ -103,7 +103,7 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
 /**
  Whether created requests can use the device’s cellular radio (if present). `YES` by default.
 
- @see NSMutableURLRequest -setAllowsCellularAccess:
+ @see NSMutableURLRequest -setAllowsCellularAccess:  // 是否允许访问蜂窝网络
  */
 @property (nonatomic, assign) BOOL allowsCellularAccess;
 

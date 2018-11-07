@@ -597,7 +597,6 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
 }
 
 #pragma mark -
-
 - (AFURLSessionManagerTaskDelegate *)delegateForTask:(NSURLSessionTask *)task {
     NSParameterAssert(task);
 
@@ -630,7 +629,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     delegate.manager = self;
     delegate.completionHandler = completionHandler;
 
-    dataTask.taskDescription = self.taskDescriptionForSessionTasks;
+    dataTask.taskDescription = self.taskDescriptionForSessionTasks; // 这个taskDescription用来identify是否是当前的mange的session 所创建的task
     [self setDelegate:delegate forTask:dataTask];
 
     delegate.uploadProgressBlock = uploadProgressBlock;
