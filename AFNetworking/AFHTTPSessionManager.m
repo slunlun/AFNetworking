@@ -241,7 +241,7 @@
                        success:(void (^)(NSURLSessionDataTask * _Nonnull, id _Nullable))success failure:(void (^)(NSURLSessionDataTask * _Nullable, NSError * _Nonnull))failure
 {
     NSError *serializationError = nil;
-    // 组装 multipart-Form 的body及相关的header 会调用AFStreamingMultipartFormData
+    // 1. 用 AFHTTPRequestSerializer组装 multipart-Form 的body及相关的header，同时返回request
     NSMutableURLRequest *request = [self.requestSerializer multipartFormRequestWithMethod:@"POST" URLString:[[NSURL URLWithString:URLString relativeToURL:self.baseURL] absoluteString] parameters:parameters constructingBodyWithBlock:block error:&serializationError];
     for (NSString *headerField in headers.keyEnumerator) {
         [request addValue:headers[headerField] forHTTPHeaderField:headerField];
@@ -256,7 +256,7 @@
         return nil;
     }
     
-    // 对于multi-part form, 返回upload task
+    // 2. 对于multi-part form, 调用父类的upload task 方法，返回upload task
     __block NSURLSessionDataTask *task = [self uploadTaskWithStreamedRequest:request progress:uploadProgress completionHandler:^(NSURLResponse * __unused response, id responseObject, NSError *error) {
         if (error) {
             if (failure) {
@@ -270,7 +270,7 @@
     }];
     
     [task resume];
-    
+    // 3. 返回task
     return task;
 }
 

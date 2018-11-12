@@ -532,7 +532,7 @@ forHTTPHeaderField:(NSString *)field
         if (!query) {
             query = @"";
         }
-        if (![mutableRequest valueForHTTPHeaderField:@"Content-Type"]) { // 默认Content-Type 是form类型
+        if (![mutableRequest valueForHTTPHeaderField:@"Content-Type"]) { // Content-Type 是application/x-www-form-urlencoded类型
             [mutableRequest setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
         }
         [mutableRequest setHTTPBody:[query dataUsingEncoding:self.stringEncoding]]; // 将query string当做data，放到request 的body中
@@ -725,6 +725,7 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
     NSParameterAssert(fileName);
     NSParameterAssert(mimeType);
 
+    // 检测文件的相关属性，如果有错误，直接返回NO及error
     if (![fileURL isFileURL]) {
         NSDictionary *userInfo = @{NSLocalizedFailureReasonErrorKey: NSLocalizedStringFromTable(@"Expected URL to be a file URL", @"AFNetworking", nil)};
         if (error) {
@@ -746,15 +747,17 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
         return NO;
     }
 
+    // 组装form data form data中关于file的节点的头信息
     NSMutableDictionary *mutableHeaders = [NSMutableDictionary dictionary];
     [mutableHeaders setValue:[NSString stringWithFormat:@"form-data; name=\"%@\"; filename=\"%@\"", name, fileName] forKey:@"Content-Disposition"];
     [mutableHeaders setValue:mimeType forKey:@"Content-Type"];
 
+    // 将头信息以及file data的相关信息存储为AFHTTPBodyPart.
     AFHTTPBodyPart *bodyPart = [[AFHTTPBodyPart alloc] init];
     bodyPart.stringEncoding = self.stringEncoding;
     bodyPart.headers = mutableHeaders;
     bodyPart.boundary = self.boundary;
-    bodyPart.body = fileURL;
+    bodyPart.body = fileURL; // 注意AFHTTPBodyPart的body属性，是id类型，可以直接存储file URL,file data, 或NSInputStream
     bodyPart.bodyContentLength = [fileAttributes[NSFileSize] unsignedLongLongValue];
     [self.bodyStream appendHTTPBodyPart:bodyPart];
 
@@ -914,34 +917,35 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 - (NSInteger)read:(uint8_t *)buffer
         maxLength:(NSUInteger)length
 {
+    // 如果当前的stream 没有打开，则直接返回0
     if ([self streamStatus] == NSStreamStatusClosed) {
         return 0;
     }
 
     NSInteger totalNumberOfBytesRead = 0;
 
-    while ((NSUInteger)totalNumberOfBytesRead < MIN(length, self.numberOfBytesInPacket)) {
+    while ((NSUInteger)totalNumberOfBytesRead < MIN(length, self.numberOfBytesInPacket)) { // 读取iOS stream指定的大小 或 用户设置的最小包大小 （以min为准）
         if (!self.currentHTTPBodyPart || ![self.currentHTTPBodyPart hasBytesAvailable]) {
             if (!(self.currentHTTPBodyPart = [self.HTTPBodyPartEnumerator nextObject])) { // update currentHTTPBodyPart
                 break;
             }
         } else {
-            NSUInteger maxLength = MIN(length, self.numberOfBytesInPacket) - (NSUInteger)totalNumberOfBytesRead;
-            NSInteger numberOfBytesRead = [self.currentHTTPBodyPart read:&buffer[totalNumberOfBytesRead] maxLength:maxLength]; //
-            if (numberOfBytesRead == -1) {
+            NSUInteger maxLength = MIN(length, self.numberOfBytesInPacket) - (NSUInteger)totalNumberOfBytesRead; // 本次while循环可以读取的buffer 大小: 本次read:maxLength允许读取的最大字节数 - 已经读取的字节数
+            NSInteger numberOfBytesRead = [self.currentHTTPBodyPart read:&buffer[totalNumberOfBytesRead] maxLength:maxLength]; //读取数据到buffer中，并返回读取到的字节数
+            if (numberOfBytesRead == -1) { // 读取字节数等于-1 表示读取失败，退出循环
                 self.streamError = self.currentHTTPBodyPart.inputStream.streamError;
                 break;
             } else {
-                totalNumberOfBytesRead += numberOfBytesRead;
+                totalNumberOfBytesRead += numberOfBytesRead; // 更新总的字节数
 
-                if (self.delay > 0.0f) {
+                if (self.delay > 0.0f) { // 根据用户设置的延迟时间 ，休息一下
                     [NSThread sleepForTimeInterval:self.delay];
                 }
             }
         }
     }
 
-    return totalNumberOfBytesRead;
+    return totalNumberOfBytesRead; // 返回读取的总数据
 }
 
 - (BOOL)getBuffer:(__unused uint8_t **)buffer
@@ -1140,18 +1144,24 @@ typedef enum {
 - (NSInteger)read:(uint8_t *)buffer
         maxLength:(NSUInteger)length
 {
+    // 读取buffer, 并更新phase
     NSInteger totalNumberOfBytesRead = 0;
 
+    // AFHTTPBodyPart 读取stream 时，会分为三个/四个阶段 对应了multipart form data的结构
+    
+    // phase 1. 开头的分隔符
     if (_phase == AFEncapsulationBoundaryPhase) {
         NSData *encapsulationBoundaryData = [([self hasInitialBoundary] ? AFMultipartFormInitialBoundary(self.boundary) : AFMultipartFormEncapsulationBoundary(self.boundary)) dataUsingEncoding:self.stringEncoding];
         totalNumberOfBytesRead += [self readData:encapsulationBoundaryData intoBuffer:&buffer[totalNumberOfBytesRead] maxLength:(length - (NSUInteger)totalNumberOfBytesRead)];
     }
 
+    // phase 2. form 节点的header信息
     if (_phase == AFHeaderPhase) {
         NSData *headersData = [[self stringForHeaders] dataUsingEncoding:self.stringEncoding];
         totalNumberOfBytesRead += [self readData:headersData intoBuffer:&buffer[totalNumberOfBytesRead] maxLength:(length - (NSUInteger)totalNumberOfBytesRead)];
     }
 
+    // phase 3. form body
     if (_phase == AFBodyPhase) {
         NSInteger numberOfBytesRead = 0;
 
@@ -1167,6 +1177,7 @@ typedef enum {
         }
     }
 
+    // phase 4. form 的结束符（如果是最后一个 form 节点才会有这个阶段）
     if (_phase == AFFinalBoundaryPhase) {
         NSData *closingBoundaryData = ([self hasFinalBoundary] ? [AFMultipartFormFinalBoundary(self.boundary) dataUsingEncoding:self.stringEncoding] : [NSData data]);
         totalNumberOfBytesRead += [self readData:closingBoundaryData intoBuffer:&buffer[totalNumberOfBytesRead] maxLength:(length - (NSUInteger)totalNumberOfBytesRead)];
@@ -1262,7 +1273,7 @@ typedef enum {
                                         error:(NSError *__autoreleasing *)error
 {
     NSParameterAssert(request);
-
+    // 如果不需要将参数放置到 body中，则直接走super（AFHTTPRequestSerializer） 的方法，将参数放到URL中
     if ([self.HTTPMethodsEncodingParametersInURI containsObject:[[request HTTPMethod] uppercaseString]]) {
         return [super requestBySerializingRequest:request withParameters:parameters error:error];
     }
